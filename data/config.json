@@ -1,5 +1,8 @@
 {
-  "pages": [
-    "Main_Page"
-  ]
+  "title": "PagesWiki",
+  "pages": {
+    "Main_Page": {
+      "en": "Main_Page.wmd"
+    }
+  }
 }
