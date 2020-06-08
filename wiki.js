@@ -164,7 +164,6 @@
         observer.disconnect()
         const emptyEls = [].slice.call(document.getElementsByTagName('p'))
         for (const p of emptyEls) { if (p.childNodes.length === 0) p.remove() }
-        console.log(m, m.type)
       })
       // observer.disconnect()
       /* for (const p of document.getElementsByTagName('p')) { if (p.childNodes.length === 0) p.remove() }
@@ -179,7 +178,7 @@
 
   // Parsing MD
 
-  function createMDRule (regex, tags = [{ tag: 'span', attribs: {} }], content = 1, filter) {
+  function createMDRule (regex, tags = [{ tag: 'span', attribs: {} }], content = 1, postProcessing = (str) => str) {
     // /(?<=>).*?(?=<)/
 
     // /(?<=>)[^<>]*(?=<)/
@@ -187,7 +186,16 @@
     // (?<=>)[^<>]*(?=<)(?!<\/code)
 
     return str => {
-      if (filter) str = str.replace(new RegExp(filter, 'gms'), '')
+      /* if (filter) {
+        filter = [filter].flat()
+        filter.forEach(f => {
+          if (typeof f === 'string') {
+            str = str.replace(new RegExp(f, 'gms'), '')
+          } else {
+            str = str.replace(new RegExp(f.regex, 'gms'), f.string)
+          }
+        })
+      } */
       const matches = []
       const r = new RegExp(regex, 'gms')
       do {
@@ -210,14 +218,14 @@
         if (content !== false) els.push(deobfuscate(typeof content === 'function' ? content(m) : m[content]))
         const el = els.reduceRight((acc, cur) => {
           if (typeof acc === 'string') {
-            cur.innerHTML = acc
+            cur.innerHTML = `\n${acc}\n`
           } else {
             cur.appendChild(acc)
           }
           return cur
         })
 
-        str = str.slice(0, m.index) + obfuscate(el.outerHTML, false, false) + str.slice(m.index + m[0].length)
+        str = str.slice(0, m.index) + obfuscate(postProcessing(el.outerHTML), false, false) + str.slice(m.index + m[0].length)
       })
 
       return str
@@ -231,20 +239,21 @@
       createMDRule('@year-range +(?:([0-9]+)([Aa][Dd]|[Cc][Ee]|[Bb][Cc][Ee]?|)|([Nn][Oo][Ww])) +(?:([0-9]+)([Aa][Dd]|[Cc][Ee]|[Bb][Cc][Ee]?|)|([Nn][Oo][Ww]))', [{ tag: 'span', attribs: {} }], m => {
         const date1 = Number(m[3] ? new Date().getFullYear() : m[1])
         const date2 = Number(m[6] ? new Date().getFullYear() : m[4])
-        var bce2 = !m[5] || !['bce', 'bc'].includes(m[5].toLowerCase())
-        var bce1 = !m[2] || m[2] ? !['bce', 'bc'].includes(m[2].toLowerCase()) : bce2
+        var ce2 = !m[5] || !['bce', 'bc'].includes(m[5].toLowerCase())
+        var ce1 = !m[2] || m[2] ? !['bce', 'bc'].includes(m[2].toLowerCase()) : ce2
         m[2] = m[3] || m[2]
         m[6] = m[5] || m[6]
+        console.log(date1, date2, ce1, ce2)
         if (isNaN(date1) || isNaN(date2)) return new Date().getFullYear()
-        if (date1 === date2 && bce1 === bce2) return `${date1} ${bce1 ? config.era['-'] : ''}`
-        if (bce1 && bce2 && date1 > date2) return `${date1} - ${date2} ${config.era['-']}`
-        if (bce1 && bce2 && date1 < date2) return `${date2} - ${date1} ${config.era['-']}`
-        if (!bce1 && !bce2 && date1 < date2) return `${date1} - ${date2}`
-        if (!bce1 && !bce2 && m[2] && date1 > date2) return `${date2} - ${date1}`
-        if (!bce1 && !bce2 && !m[2] && date1 > date2) return `${date1} ${config.era['-']} - ${date1} ${config.era['+']}`
-        if (bce1 && !bce2) return `${date1} ${config.era['-']} - ${date2} ${config.era['+']}`
-        if (!bce1 && bce2 && m[6]) return `${date2} ${config.era['-']} - ${date1} ${config.era['+']}`
-        if (!bce1 && bce2 && !m[6]) return `${date1} - ${date2} ${config.era['+']}`
+        if (date1 === date2 && ce1 === ce2) return `${date1} ${!ce1 ? config.era['-'] : ''}`
+        if (!ce1 && !ce2 && date1 > date2) return `${date1} - ${date2} ${config.era['-']}`
+        if (!ce1 && !ce2 && date1 < date2) return `${date2} - ${date1} ${config.era['-']}`
+        if (ce1 && ce2 && date1 < date2) return `${date1} - ${date2}`
+        if (ce1 && ce2 && m[2] && date1 > date2) return `${date2} - ${date1}`
+        if (ce1 && ce2 && !m[2] && date1 > date2) return `${date1} ${config.era['-']} - ${date1} ${config.era['+']}`
+        if (!ce1 && ce2) return `${date1} ${config.era['-']} - ${date2} ${config.era['+']}`
+        if (ce1 && !ce2 && m[6]) return `${date2} ${config.era['-']} - ${date1} ${config.era['+']}`
+        if (ce1 && !ce2 && !m[6]) return `${date1} - ${date2} ${config.era['+']}`
       }),
       createMDRule('^[ \t]*@category((?:[ \t]+[A-Za-z0-9_-]+)+)[ \t]*$', [{ tag: 'input', attribs: { type: 'hidden', name: m => 'category', value: m => m[1].trim() } }], false),
       createMDRule('^[ \t]*@table-of-contents[ \t]*$', [{ tag: 'div', attribs: { class: 'toc' } }], false),
@@ -253,15 +262,87 @@
       createMDRule(' {0,3}\\[([^\\]]+)\\]:[ \\t]+(?:<([^>]+)>|([^\\s]+))(?:[ \\t]*(?:\\r|\\n|\\r\\n)?[ \\t]*(?:\\(([^)]+)\\)|\'([^\']+)\'|"([^"]+)"))?[^\\r\\n]*?$', [{ tag: 'input', attribs: { type: 'hidden', name: m => `reflink-${m[1].toLowerCase()}`, value: m => m[2] || m[3], 'data-title': m => m[4] || m[5] || m[6] || '' } }], false),
 
       // List
-      // TODO: will have to trim lines with only whitespace for this to work
-      createMDRule('(^ {1,3}(?:-|\\+|\\*)(?: |\\t)+?[^\\r\\n]*(?:(?:\\r|\\n|\\r\\n){1,2}^ {1,3}(?:-|\\+|\\*)(?: |\\t)+?[^\\r\\n]*|(?:\\r|\\n|\\r\\n){2}(?:\\t| {4}[^\\r\\n]*)|(?:\\r|\\n|\\r\\n)[^\\r\\n]+|)*)', [{ tag: 'ul', attribs: {} }], 0, [{ regex: '^ {1,3}(?:-|\\+|\\*)(?: |\\t)+?', string: '<li>' }, { regex: '(?<=^ (?:-|\\+|\\*)(?: |\\t)+?[^\\r\\n]*(?:(?:\\r|\\n|\\r\\n){2}(?:\\t| {4}[^\\r\\n]*)|(?:\\r|\\n|\\r\\n)[^\\r\\n]+|)*)$(?=(?:\\r|\\n|\\r\\n)*^ {1,3}(?:-|\\+|\\*))', string: '</li>' }, { regex: '$(?![\\n\\r])', string: '</li>' }, { regex: '^(?: {4}|\\t)' }]),
-      createMDRule('(^ {1,3}[0-9]*\\.(?: |\\t)+?[^\\r\\n]*(?:(?:\\r|\\n|\\r\\n){1,2}^ {1,3}[0-9]*\\.(?: |\\t)+?[^\\r\\n]*|(?:\\r|\\n|\\r\\n){2}(?:\\t| {4}[^\\r\\n]*)|(?:\\r|\\n|\\r\\n)[^\\r\\n]+|)*)', [{ tag: 'ol', attribs: {} }], 0, [{ regex: '^ {1,3}[0-9]*\\.(?: |\\t)+?', string: '<li>' }, { regex: '(?<=^ {1,3}[0-9]*\\.(?: |\\t)+?[^\\r\\n]*(?:(?:\\r|\\n|\\r\\n){2}(?:\\t| {4}[^\\r\\n]*)|(?:\\r|\\n|\\r\\n)[^\\r\\n]+|)*)$(?=(?:\\r|\\n|\\r\\n)*^ {1,3}[0-9]*\\.)', string: '</li>' }, { regex: '$(?![\\n\\r])', string: '</li>' }, { regex: '^(?: {4}|\\t)' }]),
+      // TODO: may be worth just running it multiple times instead of this shenanigan. With something like this: ^( {0,3}).*?^(?=\1)(?!\1 )
+      createMDRule('(^ {0,3}(?:-|\\+|\\*)(?: |\\t)+?[^\\r\\n]*(?:(?:\\r|\\n|\\r\\n){1,2}^ {0,3}(?:-|\\+|\\*)(?: |\\t)+?[^\\r\\n]*|(?:\\r|\\n|\\r\\n){2}(?:\\t| {4}[^\\r\\n]*)|(?:\\r|\\n|\\r\\n)[^\\r\\n]+|)*)', [{ tag: 'ul', attribs: {} }], 0, str => {
+        str = str.split('\n').filter(li => li)
+        str = str.slice(1, str.length - 1)
+        const indent = []
+        str.forEach((str, i) => {
+          var match = str.match(/^( *)(?:\*|\+|-)/)
+          if (!match) {
+            indent.push({ str, indent: i ? indent[i - 1].indent : 0 })
+          } else {
+            indent.push({ str, indent: match[1].length })
+          }
+        })
+        var blocks = []
+        str = indent.map((v, i, a) => {
+          v.str = v.str.replace(/ *(?:\*|\+|-) */gsm, '')
+
+          if (i + 1 !== a.length && a[i + 1].indent > v.indent) {
+            blocks.unshift(a[i + 1].indent)
+            return `<li>${v.str}<ul>`
+          } else {
+            v.str = `<li>${v.str}</li>`
+            if (i + 1 !== a.length && a[i + 1].indent < v.indent) {
+              while (blocks[0] > a[i + 1].indent) {
+                blocks.shift()
+                v.str += '</ul></li>'
+              }
+            } else if (i + 1 === a.length) {
+              while (blocks.length) {
+                blocks.shift()
+                v.str += '</ul></li>'
+              }
+            }
+            return v.str
+          }
+        })
+        return `<ul>${str.join('\n')}</ul>`
+      }),
+      createMDRule('(^ {0,3}[0-9]*\\.(?: |\\t)+?[^\\r\\n]*(?:(?:\\r|\\n|\\r\\n){1,2}^ {0,3}[0-9]*\\.(?: |\\t)+?[^\\r\\n]*|(?:\\r|\\n|\\r\\n){2}(?:\\t| {4}[^\\r\\n]*)|(?:\\r|\\n|\\r\\n)[^\\r\\n]+|)*)', [{ tag: 'ol', attribs: {} }], 0, str => {
+        str = str.split('\n').filter(li => li)
+        str = str.slice(1, str.length - 1)
+        const indent = []
+        str.forEach((str, i) => {
+          var match = str.match(/^( *)(?:[0-9]+\.)/)
+          if (!match) {
+            indent.push({ str, indent: i ? indent[i - 1].indent : 0 })
+          } else {
+            indent.push({ str, indent: match[1].length })
+          }
+        })
+        var blocks = []
+        str = indent.map((v, i, a) => {
+          v.str = v.str.replace(/ *(?:[0-9]+\.) */gsm, '')
+
+          if (i + 1 !== a.length && a[i + 1].indent > v.indent) {
+            blocks.unshift(a[i + 1].indent)
+            return `<li>${v.str}<ol>`
+          } else {
+            v.str = `<li>${v.str}</li>`
+            if (i + 1 !== a.length && a[i + 1].indent < v.indent) {
+              while (blocks[0] > a[i + 1].indent) {
+                blocks.shift()
+                v.str += '</ol></li>'
+              }
+            } else if (i + 1 === a.length) {
+              while (blocks.length) {
+                blocks.shift()
+                v.str += '</ol></li>'
+              }
+            }
+            return v.str
+          }
+        })
+        return `<ol>${str.join('\n')}</ol>`
+      }),
 
       // Code
       createMDRule('^```(.*?)^(.*?)```', [{ tag: 'pre', attribs: {} }, { tag: 'code', attribs: { 'data-settings': 1 } }], 2),
       createMDRule('``([^\\n\\r]*?)``', [{ tag: 'code', attribs: {} }], 1),
       createMDRule('`([^\\n\\r]*?)`', [{ tag: 'code', attribs: {} }], 1),
-      createMDRule('((?:^(?:\\t|    )[^\\n\\r]*$(?:\\n|\\r|\\r\\n))+)', [{ tag: 'pre', attribs: {} }, { tag: 'code', attribs: {} }], 1, '(^\\t)'),
+      createMDRule('((?:^(?:\\t|    )[^\\n\\r]*$(?:\\n|\\r|\\r\\n))+)', [{ tag: 'pre', attribs: {} }, { tag: 'code', attribs: {} }], 1/*, ',(^\\t)' */, str => str.replace(/^\t/gms, '')),
 
       // Blockquote
       createMDRule('^> ([^\\n\\r]*)', [{ tag: 'blockquote', attribs: {} }], 1),
@@ -302,15 +383,11 @@
 
       // Images
       createMDRule('!\\[([^\\]]*)\\]\\(([^\\s]+)\\)(?=\\s|$)', [{ tag: 'img', attribs: { src: 2, alt: 1, title: 1 } }], false),
-      /* createMDRule('!\\[([^\\]]+)\\] ?\\[([^\\]]+)\\]', [{ tag: 'img', attribs: { src: m => document.getElementsByName(`reflink-${m[2].toLowerCase()}`)[0].value, alt: m => document.getElementsByName(`reflink-${m[2]}`)[0].getAttribute('data-title'), title: m => document.getElementsByName(`reflink-${m[2]}`)[0].getAttribute('data-title') } }], 1),
-      createMDRule('!\\[([^\\]]+)\\] ?\\[\\]', [{ tag: 'img', attribs: { src: m => document.getElementsByName(`reflink-${m[1].toLowerCase()}`)[0].value, alt: m => document.getElementsByName(`reflink-${m[1]}`)[0].getAttribute('data-title'), title: m => document.getElementsByName(`reflink-${m[1]}`)[0].getAttribute('data-title') } }], 1), */
       createMDRule('!\\[([^\\]]+)\\] ?\\[([^\\]]+)\\]', [{ tag: 'img', attribs: { class: 'reflink', 'data-reflink': m => m[2] } }], 1),
       createMDRule('!\\[([^\\]]+)\\] ?\\[\\]', [{ tag: 'img', attribs: { class: 'reflink', 'data-reflink': m => m[1] } }], 1),
 
       // Links
       createMDRule('\\[([^\\]]+)\\]\\(([^\\s]+)\\)(?=\\s|$)', [{ tag: 'a', attribs: { href: 2 } }], 1),
-      /* createMDRule('\\[([^\\]]+)\\] ?\\[([^\\]]+)\\]', [{ tag: 'a', attribs: { href: m => document.getElementsByName(`reflink-${m[2].toLowerCase()}`)[0].value, title: m => document.getElementsByName(`reflink-${m[2]}`)[0].getAttribute('data-title') } }], 1),
-      createMDRule('\\[([^\\]]+)\\] ?\\[\\]', [{ tag: 'a', attribs: { href: m => document.getElementsByName(`reflink-${m[1].toLowerCase()}`)[0].value, title: m => document.getElementsByName(`reflink-${m[1]}`)[0].getAttribute('data-title') } }], 1), */
       createMDRule('\\[([^\\]]+)\\] ?\\[([^\\]]+)\\]', [{ tag: 'a', attribs: { class: 'reflink', 'data-reflink': m => m[2] } }], 1),
       createMDRule('\\[([^\\]]+)\\] ?\\[\\]', [{ tag: 'a', attribs: { class: 'reflink', 'data-reflink': m => m[1] } }], 1),
 
@@ -320,7 +397,7 @@
 
       // Auto Links
       createMDRule('<([^ ]+@[^ ]+\\.[^ ]+)>(?=\\s|$)', [{ tag: 'a', attribs: { href: m => obfuscate(`mailto:${m[1]}`) } }], m => obfuscate(m, true)),
-      createMDRule('<([^ ]*[@.:/?&][^ ]*)>(?=\\s|$)', [{ tag: 'a', attribs: { href: 1 } }], 1),
+      createMDRule('<([^ ]*[#@.:/?&][^ ]*)>(?=\\s|$)', [{ tag: 'a', attribs: { href: 1 } }], 1),
 
       // Paragraphs
       createMDRule('^(?:\\r|\\n|\\r\\n)(^[^\\r\\n]+$)(?:\\r|\\n|\\r\\n)$', [{ tag: 'p', attribs: {} }], 1)
