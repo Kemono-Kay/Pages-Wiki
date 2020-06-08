@@ -1,10 +1,10 @@
-@category "Miscellaneous" "Examples"
+@category Miscellaneous Examples
 
 # Main Page
 
 This is the [[Main_Page]] of the wiki.
 
-@toc
+@table-of-contents
 
 ## This is a section
 

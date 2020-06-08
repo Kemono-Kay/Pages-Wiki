@@ -1,8 +1,10 @@
 {
   "title": "PagesWiki",
   "pages": {
-    "Main_Page": {
-      "en": "Main_Page.wmd"
-    }
-  }
+    "Main_Page": "Main_Page.md"
+  },
+  "nav": [
+    "Main_Page"
+  ],
+  "footer":"Footer.md"
 }
