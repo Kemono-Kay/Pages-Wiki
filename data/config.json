@@ -1,10 +1,12 @@
 {
   "title": "PagesWiki",
   "pages": {
-    "Main_Page": "Main_Page.md"
+    "Main_Page": "Main_Page.md",
+    "Test_Page": "test/test.md"
   },
   "nav": [
     "Main_Page"
   ],
-  "footer":"Footer.md"
+  "footer":"Footer.md",
+  "era":"AD"
 }

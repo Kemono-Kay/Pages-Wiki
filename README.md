@@ -26,6 +26,10 @@ Either an array or a string. As an array, it contains a list of page names. If i
 
 Either an array or a string. As an array, it contains a list of page names. If it's a string, it's a link to a markdown file. This property is optional.
 
+### `era`
+
+Whether to use BC/AD or BCE/CE. Can take any of the aforementioned values. Case-insensitive. This property is optional. If it's not present, it defaults to BC/AD.
+
 ## Markdown
 
 This wiki uses a custom markdown flavour. Markdown syntax is standward, but with a handful of additions.

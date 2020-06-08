@@ -24,6 +24,9 @@
     if (!window.location.search) { params.title = Object.keys(config.pages)[0]; return updateQueryParams() }
     if (!params.s && !Object.keys(config.pages).includes(params.title)) { params.s = params.title; return updateQueryParams() }
 
+    if (!config.era) { config.era = 'BC' }
+    config.era = ['bc', 'ad'].includes(config.era.toLowerCase()) ? { '-': 'BC', '+': 'AD' } : { '-': 'BCE', '+': 'CE' }
+
     if (config.footer) {
       if (typeof config.footer === 'string') {
         xhr(`./data/${config.footer}`, loadFooterMD)
@@ -41,7 +44,7 @@
     }
 
     if (params.s) return loadSearchPage()
-    return xhr(`./data/${params.title}.md`, loadArticlePage)
+    return xhr(`./data/${config.pages[params.title]}`, loadArticlePage)
   }
 
   /* function getScript (location, cb) {
@@ -154,12 +157,24 @@
 
   function loadPageIfReady () {
     if (!(footer && nav && article)) return
-
     document.body.removeAttribute('aria-describedby')
+
+    var observer = new MutationObserver(function (m) {
+      m.forEach(function (m) {
+        observer.disconnect()
+        const emptyEls = [].slice.call(document.getElementsByTagName('p'))
+        for (const p of emptyEls) { if (p.childNodes.length === 0) p.remove() }
+        console.log(m, m.type)
+      })
+      // observer.disconnect()
+      /* for (const p of document.getElementsByTagName('p')) { if (p.childNodes.length === 0) p.remove() }
+      document.getElementById('search').addEventListener('input', autocompleteArticle)
+      // TODO attach functions
+      document.body.removeAttribute('aria-busy') */
+    })
+
+    observer.observe(document.body, { childList: true, subtree: true })
     document.body.innerHTML = getPageHTML(article, footer, nav)
-    document.getElementById('search').addEventListener('input', autocompleteArticle)
-    // TODO attach functions
-    document.body.removeAttribute('aria-busy')
   }
 
   // Parsing MD
@@ -174,58 +189,169 @@
     return str => {
       if (filter) str = str.replace(new RegExp(filter, 'gms'), '')
       const matches = []
+      const r = new RegExp(regex, 'gms')
       do {
-        const match = new RegExp(regex, 'gms').exec(str)
+        const match = r.exec(str)
         if (!match) break
         matches.unshift(match)
       } while (true)
 
-      return matches.forEach(m => {
+      matches.forEach(m => {
         const els = tags.map(o => {
           const el = document.createElement(o.tag)
           Object.keys(o.attribs).forEach(key =>
-            el.setAttribute(key, o.attribs[key] === 'number' ? m[o.attribs[key]] : o.attribs[key]))
+            el.setAttribute(key, typeof o.attribs[key] === 'number'
+              ? m[o.attribs[key]]
+              : typeof o.attribs[key] === 'function'
+                ? o.attribs[key](m)
+                : o.attribs[key]))
           return el
         })
-        if (content) els.push(document.createTextNode(m[content]))
+        if (content !== false) els.push(deobfuscate(typeof content === 'function' ? content(m) : m[content]))
         const el = els.reduceRight((acc, cur) => {
-          cur.appendChild(acc)
+          if (typeof acc === 'string') {
+            cur.innerHTML = acc
+          } else {
+            cur.appendChild(acc)
+          }
           return cur
         })
 
-        str = str.slice(0, m.index) + el.outerHTML + str.slice(m.index + m[0].length)
+        str = str.slice(0, m.index) + obfuscate(el.outerHTML, false, false) + str.slice(m.index + m[0].length)
       })
+
+      return str
     }
   }
 
   function getMDInfo () {
     return [
+
+      // At-directives
+      createMDRule('@year-range +(?:([0-9]+)([Aa][Dd]|[Cc][Ee]|[Bb][Cc][Ee]?|)|([Nn][Oo][Ww])) +(?:([0-9]+)([Aa][Dd]|[Cc][Ee]|[Bb][Cc][Ee]?|)|([Nn][Oo][Ww]))', [{ tag: 'span', attribs: {} }], m => {
+        const date1 = Number(m[3] ? new Date().getFullYear() : m[1])
+        const date2 = Number(m[6] ? new Date().getFullYear() : m[4])
+        var bce2 = !m[5] || !['bce', 'bc'].includes(m[5].toLowerCase())
+        var bce1 = !m[2] || m[2] ? !['bce', 'bc'].includes(m[2].toLowerCase()) : bce2
+        m[2] = m[3] || m[2]
+        m[6] = m[5] || m[6]
+        if (isNaN(date1) || isNaN(date2)) return new Date().getFullYear()
+        if (date1 === date2 && bce1 === bce2) return `${date1} ${bce1 ? config.era['-'] : ''}`
+        if (bce1 && bce2 && date1 > date2) return `${date1} - ${date2} ${config.era['-']}`
+        if (bce1 && bce2 && date1 < date2) return `${date2} - ${date1} ${config.era['-']}`
+        if (!bce1 && !bce2 && date1 < date2) return `${date1} - ${date2}`
+        if (!bce1 && !bce2 && m[2] && date1 > date2) return `${date2} - ${date1}`
+        if (!bce1 && !bce2 && !m[2] && date1 > date2) return `${date1} ${config.era['-']} - ${date1} ${config.era['+']}`
+        if (bce1 && !bce2) return `${date1} ${config.era['-']} - ${date2} ${config.era['+']}`
+        if (!bce1 && bce2 && m[6]) return `${date2} ${config.era['-']} - ${date1} ${config.era['+']}`
+        if (!bce1 && bce2 && !m[6]) return `${date1} - ${date2} ${config.era['+']}`
+      }),
+      createMDRule('^[ \t]*@category((?:[ \t]+[A-Za-z0-9_-]+)+)[ \t]*$', [{ tag: 'input', attribs: { type: 'hidden', name: m => 'category', value: m => m[1].trim() } }], false),
+      createMDRule('^[ \t]*@table-of-contents[ \t]*$', [{ tag: 'div', attribs: { class: 'toc' } }], false),
+
+      // Reference
+      createMDRule(' {0,3}\\[([^\\]]+)\\]:[ \\t]+(?:<([^>]+)>|([^\\s]+))(?:[ \\t]*(?:\\r|\\n|\\r\\n)?[ \\t]*(?:\\(([^)]+)\\)|\'([^\']+)\'|"([^"]+)"))?[^\\r\\n]*?$', [{ tag: 'input', attribs: { type: 'hidden', name: m => `reflink-${m[1].toLowerCase()}`, value: m => m[2] || m[3], 'data-title': m => m[4] || m[5] || m[6] || '' } }], false),
+
+      // List
+      // TODO: will have to trim lines with only whitespace for this to work
+      createMDRule('(^ {1,3}(?:-|\\+|\\*)(?: |\\t)+?[^\\r\\n]*(?:(?:\\r|\\n|\\r\\n){1,2}^ {1,3}(?:-|\\+|\\*)(?: |\\t)+?[^\\r\\n]*|(?:\\r|\\n|\\r\\n){2}(?:\\t| {4}[^\\r\\n]*)|(?:\\r|\\n|\\r\\n)[^\\r\\n]+|)*)', [{ tag: 'ul', attribs: {} }], 0, [{ regex: '^ {1,3}(?:-|\\+|\\*)(?: |\\t)+?', string: '<li>' }, { regex: '(?<=^ (?:-|\\+|\\*)(?: |\\t)+?[^\\r\\n]*(?:(?:\\r|\\n|\\r\\n){2}(?:\\t| {4}[^\\r\\n]*)|(?:\\r|\\n|\\r\\n)[^\\r\\n]+|)*)$(?=(?:\\r|\\n|\\r\\n)*^ {1,3}(?:-|\\+|\\*))', string: '</li>' }, { regex: '$(?![\\n\\r])', string: '</li>' }, { regex: '^(?: {4}|\\t)' }]),
+      createMDRule('(^ {1,3}[0-9]*\\.(?: |\\t)+?[^\\r\\n]*(?:(?:\\r|\\n|\\r\\n){1,2}^ {1,3}[0-9]*\\.(?: |\\t)+?[^\\r\\n]*|(?:\\r|\\n|\\r\\n){2}(?:\\t| {4}[^\\r\\n]*)|(?:\\r|\\n|\\r\\n)[^\\r\\n]+|)*)', [{ tag: 'ol', attribs: {} }], 0, [{ regex: '^ {1,3}[0-9]*\\.(?: |\\t)+?', string: '<li>' }, { regex: '(?<=^ {1,3}[0-9]*\\.(?: |\\t)+?[^\\r\\n]*(?:(?:\\r|\\n|\\r\\n){2}(?:\\t| {4}[^\\r\\n]*)|(?:\\r|\\n|\\r\\n)[^\\r\\n]+|)*)$(?=(?:\\r|\\n|\\r\\n)*^ {1,3}[0-9]*\\.)', string: '</li>' }, { regex: '$(?![\\n\\r])', string: '</li>' }, { regex: '^(?: {4}|\\t)' }]),
+
       // Code
-      createMDRule('^```(.*?)^(.*?)```', [{ tag: 'pre', attribs: {} }, { tag: 'code', attribs: { settings: 1 } }], 2),
-      createMDRule('``([^\n\r]*?)``', [{ tag: 'code', attribs: {} }], 1),
-      createMDRule('`([^\n\r]*?)`', [{ tag: 'code', attribs: {} }], 1),
-      createMDRule('((?:^(?:\t|    )[^\n\r]*$(?:\n|\r|\r\n))+)', [{ tag: 'pre', attribs: {} }, { tag: 'code', attribs: {} }], 1, '(^\t)'),
+      createMDRule('^```(.*?)^(.*?)```', [{ tag: 'pre', attribs: {} }, { tag: 'code', attribs: { 'data-settings': 1 } }], 2),
+      createMDRule('``([^\\n\\r]*?)``', [{ tag: 'code', attribs: {} }], 1),
+      createMDRule('`([^\\n\\r]*?)`', [{ tag: 'code', attribs: {} }], 1),
+      createMDRule('((?:^(?:\\t|    )[^\\n\\r]*$(?:\\n|\\r|\\r\\n))+)', [{ tag: 'pre', attribs: {} }, { tag: 'code', attribs: {} }], 1, '(^\\t)'),
 
       // Blockquote
-      createMDRule('^> ([^\n\r]*)', [{ tag: 'blockquote', attribs: {} }], 1),
+      createMDRule('^> ([^\\n\\r]*)', [{ tag: 'blockquote', attribs: {} }], 1),
 
       // Headings
-      createMDRule('^###### ([^\r\n]*?)(?: #*)?$', [{ tag: 'h6', attribs: {} }], 1),
-      createMDRule('^##### ([^\r\n]*?)(?: #*)?$', [{ tag: 'h5', attribs: {} }], 1),
-      createMDRule('^#### ([^\r\n]*?)(?: #*)?$', [{ tag: 'h4', attribs: {} }], 1),
-      createMDRule('^### ([^\r\n]*?)(?: #*)?$', [{ tag: 'h3', attribs: {} }], 1),
-      createMDRule('^## ([^\r\n]*?)(?: #*)?$', [{ tag: 'h2', attribs: {} }], 1),
-      createMDRule('^# ([^\r\n]*?)(?: #*)?$', [{ tag: 'h1', attribs: {} }], 1),
-      createMDRule('^([^\r\n]*)$(?:\r|\n|\r\n)^=+', [{ tag: 'h1', attribs: {} }], 1),
-      createMDRule('^([^\r\n]*)$(?:\r|\n|\r\n)^-+', [{ tag: 'h2', attribs: {} }], 1),
+      createMDRule('^###### ([^\\r\\n]*?)(?: #*)?$', [{ tag: 'h6', attribs: {} }], 1),
+      createMDRule('^##### ([^\\r\\n]*?)(?: #*)?$', [{ tag: 'h5', attribs: {} }], 1),
+      createMDRule('^#### ([^\\r\\n]*?)(?: #*)?$', [{ tag: 'h4', attribs: {} }], 1),
+      createMDRule('^### ([^\\r\\n]*?)(?: #*)?$', [{ tag: 'h3', attribs: {} }], 1),
+      createMDRule('^## ([^\\r\\n]*?)(?: #*)?$', [{ tag: 'h2', attribs: {} }], 1),
+      createMDRule('^# ([^\\r\\n]*?)(?: #*)?$', [{ tag: 'h1', attribs: {} }], 1),
+      createMDRule('^([^\\r\\n]*)$(?:\\r|\\n|\\r\\n)^=+', [{ tag: 'h1', attribs: {} }], 1),
+      createMDRule('^([^\\r\\n]*)$(?:\\r|\\n|\\r\\n)^-+', [{ tag: 'h2', attribs: {} }], 1),
 
-      // Unordered List
-      createMDRule('(^ {1,3}(?:-|\+|\*)(?: |\t)+?.*?\n{3})', [{ tag: 'ul', attribs: {} }], 1, [{ regex: '^ {1,3}(?:-|\+|\*)(?: |\t)+?', string: '<li>' }, { regex: '$', string: '</li>' }]) // eslint-disable-line no-useless-escape
+      // Horizontal Rule
+      createMDRule('^([ _*-]*[_*-][ _*-]*[_*-][ _*-]*[_*-][ _*-]*)$', [{ tag: 'hr', attribs: {} }], false),
+
+      // Wikilinks
+      createMDRule('\\[\\[([a-zA-Z0-9_-]+?)\\]\\]', [{
+        tag: 'a',
+        attribs: {
+          href: m => `?title=${m[1]}`,
+          title: m => m[1].replace('_', ' ')
+        }
+      }],
+      m => {
+        const s = m[1].split(':')
+        return s[s.length - 1].replace('_', ' ')
+      }),
+      createMDRule('\\[([^\\]]+?)\\]\\(\\[([a-zA-Z0-9_-]+?)\\]\\)', [{
+        tag: 'a',
+        attribs: {
+          href: m => `?title=${m[2]}`,
+          title: m => m[2].replace('_', ' ')
+        }
+      }],
+      1),
+
+      // Images
+      createMDRule('!\\[([^\\]]*)\\]\\(([^\\s]+)\\)(?=\\s|$)', [{ tag: 'img', attribs: { src: 2, alt: 1, title: 1 } }], false),
+      /* createMDRule('!\\[([^\\]]+)\\] ?\\[([^\\]]+)\\]', [{ tag: 'img', attribs: { src: m => document.getElementsByName(`reflink-${m[2].toLowerCase()}`)[0].value, alt: m => document.getElementsByName(`reflink-${m[2]}`)[0].getAttribute('data-title'), title: m => document.getElementsByName(`reflink-${m[2]}`)[0].getAttribute('data-title') } }], 1),
+      createMDRule('!\\[([^\\]]+)\\] ?\\[\\]', [{ tag: 'img', attribs: { src: m => document.getElementsByName(`reflink-${m[1].toLowerCase()}`)[0].value, alt: m => document.getElementsByName(`reflink-${m[1]}`)[0].getAttribute('data-title'), title: m => document.getElementsByName(`reflink-${m[1]}`)[0].getAttribute('data-title') } }], 1), */
+      createMDRule('!\\[([^\\]]+)\\] ?\\[([^\\]]+)\\]', [{ tag: 'img', attribs: { class: 'reflink', 'data-reflink': m => m[2] } }], 1),
+      createMDRule('!\\[([^\\]]+)\\] ?\\[\\]', [{ tag: 'img', attribs: { class: 'reflink', 'data-reflink': m => m[1] } }], 1),
+
+      // Links
+      createMDRule('\\[([^\\]]+)\\]\\(([^\\s]+)\\)(?=\\s|$)', [{ tag: 'a', attribs: { href: 2 } }], 1),
+      /* createMDRule('\\[([^\\]]+)\\] ?\\[([^\\]]+)\\]', [{ tag: 'a', attribs: { href: m => document.getElementsByName(`reflink-${m[2].toLowerCase()}`)[0].value, title: m => document.getElementsByName(`reflink-${m[2]}`)[0].getAttribute('data-title') } }], 1),
+      createMDRule('\\[([^\\]]+)\\] ?\\[\\]', [{ tag: 'a', attribs: { href: m => document.getElementsByName(`reflink-${m[1].toLowerCase()}`)[0].value, title: m => document.getElementsByName(`reflink-${m[1]}`)[0].getAttribute('data-title') } }], 1), */
+      createMDRule('\\[([^\\]]+)\\] ?\\[([^\\]]+)\\]', [{ tag: 'a', attribs: { class: 'reflink', 'data-reflink': m => m[2] } }], 1),
+      createMDRule('\\[([^\\]]+)\\] ?\\[\\]', [{ tag: 'a', attribs: { class: 'reflink', 'data-reflink': m => m[1] } }], 1),
+
+      // Emphasis
+      createMDRule('\\*\\*(?! )([^\\r\\n]*?)(?<! )\\*\\*|__(?! )([^\\r\\n]*?)(?<! )__', [{ tag: 'strong', attribs: {} }], m => m[1] || m[2]),
+      createMDRule('\\*(?! )([^\\r\\n]*?)(?<! )\\*|_(?! )([^\\r\\n]*?)(?<! )_', [{ tag: 'em', attribs: {} }], m => m[1] || m[2]),
+
+      // Auto Links
+      createMDRule('<([^ ]+@[^ ]+\\.[^ ]+)>(?=\\s|$)', [{ tag: 'a', attribs: { href: m => obfuscate(`mailto:${m[1]}`) } }], m => obfuscate(m, true)),
+      createMDRule('<([^ ]*[@.:/?&][^ ]*)>(?=\\s|$)', [{ tag: 'a', attribs: { href: 1 } }], 1),
+
+      // Paragraphs
+      createMDRule('^(?:\\r|\\n|\\r\\n)(^[^\\r\\n]+$)(?:\\r|\\n|\\r\\n)$', [{ tag: 'p', attribs: {} }], 1)
+
     ]
   }
 
+  function obfuscate (str, spaces = false, random = true) {
+    return str.split('').map(char => {
+      var str = spaces && Math.random() > 0.7 ? Math.random() > 0.5 ? '&#xfeff;' : '&#65279;' : ''
+      if (Math.random() > 0.5 || !random) {
+        str += `&#${char.codePointAt(0).toString(10)};`
+      } else {
+        str += `&#x${char.codePointAt(0).toString(16)};`
+      }
+      return str
+    }).join('')
+  }
+
+  function deobfuscate (str) {
+    return str.replace(/&#([0-9]*);/gms, (_, m) => String.fromCodePoint(m))
+  }
+
   function parseMD (content) {
-    // TODO
-    return content
+    // TODO markdown post-processing
+    content = MD.reduce((str, rule) => rule(str), `\n${content}\n`
+      .split(/(?:\r\n|\r|\n)/)
+      .map(str => str.trim().length ? str : '')
+      .join('\n')
+      .replace(/\\[\\`*_{}[\]()#+-.!@]/gms, m => `&#${m.codePointAt(1)};`))
+    // .replace(/(?<![\r\n])(?:\r|\n|\r\n)(?![\r\n])/gms, ' ')
+    return deobfuscate(content).replace(/<p><\/p>/g, '')
   }
 })()
