@@ -32,9 +32,9 @@ This wiki uses a custom markdown flavour. Markdown syntax is standward, but with
 
 ### Wikilinks
 
-Text wrapped in double square brackets `\[\[Wiki_Link\]\]` is parsed as a wikilink. This means that it's not necessary to supply a target to link to; the software will figure out the target and presentation for you.
+Text wrapped in double square brackets `[[Wiki_Link]]` is parsed as a wikilink. This means that it's not necessary to supply a target to link to; the software will figure out the target and presentation for you.
 
-Wikilinks can also use custom text by setting them as the target of a URL: `\[Text\]\(\[Wiki_Link\]\)`
+Wikilinks can also use custom text by setting them as the target of a URL: `[Text]([Wiki_Link])`
 
 ### At-Directives
 
